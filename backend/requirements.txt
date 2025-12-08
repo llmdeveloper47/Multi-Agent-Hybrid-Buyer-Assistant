@@ -1,0 +1,52 @@
+# Hybrid Buyer Advisor - Backend Dependencies
+# ============================================
+
+# Core Framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
+python-dotenv>=1.0.0
+
+# LangChain & LangGraph
+langchain>=0.1.0
+langgraph>=0.0.20
+langchain-openai>=0.0.5
+langchain-community>=0.0.10
+
+# OpenAI
+openai>=1.6.0
+
+# Superlinked - Vector Search Framework with Qdrant Backend
+# Provides: multi-modal search, natural language queries, automatic embeddings
+superlinked>=9.30.0
+
+# Vector Store - Qdrant (Superlinked backend)
+qdrant-client>=1.7.0
+
+# Data Processing
+pandas>=2.1.0
+numpy>=1.24.0
+
+# Progress Bar
+tqdm>=4.66.0
+
+# HTTP Client (for async operations)
+httpx>=0.25.0
+
+# Development & Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+
+# Type checking
+mypy>=1.7.0
+
+# Linting & Formatting
+black>=23.12.0
+isort>=5.13.0
+flake8>=6.1.0
+
+# Security
+python-multipart>=0.0.6  # For file uploads if needed
+
