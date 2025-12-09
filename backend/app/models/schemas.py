@@ -8,37 +8,67 @@ from datetime import datetime
 
 
 class PropertySummary(BaseModel):
-    """Summary of a real estate property."""
+    """
+    Summary of a real estate property.
+    
+    Maps to realtor-data.csv columns:
+    brokered_by, status, price, bed, bath, acre_lot, street, city, state, zip_code, house_size, prev_sold_date
+    
+    Accepts both CSV column names (bed, bath, house_size, status, street) 
+    and API-friendly names (bedrooms, bathrooms, sqft, property_type, address).
+    """
     
     id: str = Field(..., description="Unique identifier for the property")
-    property_type: Optional[str] = Field(None, description="Type/status of property (e.g., for_sale, Single Family)")
+    
+    # Price
     price: Optional[float] = Field(None, description="Listing price in USD")
-    bedrooms: Optional[int] = Field(None, description="Number of bedrooms")
-    bathrooms: Optional[float] = Field(None, description="Number of bathrooms")
-    sqft: Optional[float] = Field(None, description="Square footage (house_size)")
+    
+    # Bedrooms - accepts 'bed' or 'bedrooms'
+    bedrooms: Optional[int] = Field(None, alias="bed", description="Number of bedrooms")
+    
+    # Bathrooms - accepts 'bath' or 'bathrooms'
+    bathrooms: Optional[float] = Field(None, alias="bath", description="Number of bathrooms")
+    
+    # Size - accepts 'house_size' or 'sqft'
+    sqft: Optional[float] = Field(None, alias="house_size", description="Square footage")
+    
+    # Lot size
     acre_lot: Optional[float] = Field(None, description="Lot size in acres")
+    
+    # Location
     city: Optional[str] = Field(None, description="City name")
     state: Optional[str] = Field(None, description="State name or abbreviation")
-    address: Optional[str] = Field(None, description="Street address")
     zip_code: Optional[str] = Field(None, description="ZIP code")
-    description: Optional[str] = Field(None, description="Property description or summary")
+    
+    # Address - accepts 'street' or 'address'
+    address: Optional[str] = Field(None, alias="street", description="Street address")
+    
+    # Status - accepts 'status' or 'property_type'
+    property_type: Optional[str] = Field(None, alias="status", description="Type/status of property (e.g., for_sale, sold)")
+    
+    # Additional fields
     brokered_by: Optional[str] = Field(None, description="Broker ID")
     prev_sold_date: Optional[str] = Field(None, description="Previous sold date")
+    description: Optional[str] = Field(None, description="Property description or summary")
+    score: Optional[float] = Field(None, description="Search relevance score")
     
     class Config:
+        populate_by_name = True  # Allow both alias and field name
         json_schema_extra = {
             "example": {
-                "id": "prop_12345",
+                "id": "12345",
                 "property_type": "for_sale",
                 "price": 450000,
                 "bedrooms": 3,
-                "bathrooms": 2,
+                "bathrooms": 2.0,
                 "sqft": 1800,
                 "acre_lot": 0.25,
                 "city": "Austin",
                 "state": "Texas",
-                "address": "123 Maple St",
-                "zip_code": "78701"
+                "address": "123456",
+                "zip_code": "78701",
+                "brokered_by": "1234",
+                "prev_sold_date": "2020-05-15"
             }
         }
 

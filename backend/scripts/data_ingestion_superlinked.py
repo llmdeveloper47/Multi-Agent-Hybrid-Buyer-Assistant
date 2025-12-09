@@ -90,6 +90,9 @@ def prepare_properties(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """
     Prepare properties for Superlinked ingestion.
     
+    Maps exactly to realtor-data.csv columns:
+    brokered_by, status, price, bed, bath, acre_lot, street, city, state, zip_code, house_size, prev_sold_date
+    
     Args:
         df: DataFrame with property data
         
@@ -98,19 +101,50 @@ def prepare_properties(df: pd.DataFrame) -> List[Dict[str, Any]]:
     """
     properties = []
     
+    def safe_float(val, default=0.0):
+        """Safely convert to float, handling NaN."""
+        try:
+            if pd.isna(val):
+                return default
+            return float(val)
+        except (ValueError, TypeError):
+            return default
+    
+    def safe_int(val, default=0):
+        """Safely convert to int, handling NaN."""
+        try:
+            if pd.isna(val):
+                return default
+            return int(float(val))
+        except (ValueError, TypeError):
+            return default
+    
+    def safe_str(val, default=""):
+        """Safely convert to string, handling NaN."""
+        if pd.isna(val):
+            return default
+        return str(val)
+    
     for idx, row in df.iterrows():
         prop = {
+            # ID from DataFrame index
             "id": str(idx),
-            "price": float(row.get("price", 0) or 0),
-            "bed": int(row.get("bed", 0) or 0),
-            "bath": float(row.get("bath", 0) or 0),
-            "house_size": float(row.get("house_size", 0) or 0),
-            "acre_lot": float(row.get("acre_lot", 0) or 0),
-            "city": str(row.get("city", "") or ""),
-            "state": str(row.get("state", "") or ""),
-            "street": str(row.get("street", "") or ""),
-            "zip_code": str(row.get("zip_code", "") or ""),
-            "status": str(row.get("status", "for_sale") or "for_sale"),
+            
+            # Numeric fields (exact CSV column names)
+            "price": safe_float(row.get("price")),
+            "bed": safe_int(row.get("bed")),
+            "bath": safe_float(row.get("bath")),
+            "house_size": safe_float(row.get("house_size")),
+            "acre_lot": safe_float(row.get("acre_lot")),
+            "zip_code": safe_int(row.get("zip_code")),
+            
+            # String fields (exact CSV column names)
+            "status": safe_str(row.get("status"), "for_sale"),
+            "city": safe_str(row.get("city")),
+            "state": safe_str(row.get("state")),
+            "street": safe_str(row.get("street")),
+            "brokered_by": safe_str(row.get("brokered_by")),
+            "prev_sold_date": safe_str(row.get("prev_sold_date")),
         }
         properties.append(prop)
     
@@ -158,7 +192,7 @@ def verify_ingestion():
     """Verify the ingestion by running test queries."""
     logger.info("Verifying ingestion with Superlinked...")
     
-    superlinked = get_superlinked_service()
+    superlinked = get_superlinked_service(load_stats_from_data=False)
     
     # Get stats
     stats = superlinked.get_stats()
@@ -185,20 +219,25 @@ def verify_ingestion():
             logger.info(f"Found {len(results)} results:")
             
             for i, result in enumerate(results, 1):
-                city = result.get('City', 'N/A')
-                state = result.get('State', 'N/A')
-                price = result.get('Price', 0)
-                beds = result.get('Bedrooms', 'N/A')
-                baths = result.get('Bathrooms', 'N/A')
-                sqft = result.get('Size', 'N/A')
+                # Use exact CSV column names
+                city = result.get('city', 'N/A')
+                state = result.get('state', 'N/A')
+                price = result.get('price', 0)
+                beds = result.get('bed', 'N/A')
+                baths = result.get('bath', 'N/A')
+                sqft = result.get('house_size', 'N/A')
+                acre = result.get('acre_lot', 'N/A')
+                status = result.get('status', 'N/A')
                 score = result.get('score', 0)
                 
                 price_str = f"${price:,.0f}" if price else "N/A"
                 sqft_str = f"{sqft:,.0f} sqft" if sqft and sqft != 'N/A' else "N/A"
+                acre_str = f"{acre:.2f} acre" if acre and acre != 'N/A' else "N/A"
                 
                 logger.info(
                     f"  {i}. {city}, {state} - {price_str} | "
-                    f"{beds} bed, {baths} bath | {sqft_str} | score: {score:.3f}"
+                    f"{beds} bed, {baths} bath | {sqft_str} | {acre_str} | "
+                    f"status: {status} | score: {score:.3f}"
                 )
                 
         except Exception as e:

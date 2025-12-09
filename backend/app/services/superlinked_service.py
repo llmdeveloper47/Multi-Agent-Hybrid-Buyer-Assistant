@@ -6,11 +6,16 @@ Uses Superlinked framework for multi-modal vector search with:
 - Number spaces for price, bedrooms, bathrooms filtering
 - Natural language query support with OpenAI integration
 - Qdrant as the persistent vector database backend
+
+Dataset: realtor-data.csv
+Columns: brokered_by, status, price, bed, bath, acre_lot, street, city, state, zip_code, house_size, prev_sold_date
 """
 
 import os
+import pandas as pd
 from typing import List, Dict, Any, Optional
 from functools import lru_cache
+from pathlib import Path
 
 from superlinked import framework as sl
 
@@ -18,26 +23,117 @@ from ..config import get_settings
 
 
 # ============================================================
+# Dataset Statistics (from realtor-data.csv analysis)
+# These are used for NumberSpace min/max values
+# ============================================================
+
+DATASET_STATS = {
+    "price": {"min": 100000.0, "max": 515000000.0},
+    "bed": {"min": 1, "max": 50},  # Capped at realistic max (dataset has outliers up to 444)
+    "bath": {"min": 1, "max": 30},  # Capped at realistic max (dataset has outliers up to 222)
+    "acre_lot": {"min": 0.0, "max": 100000.0},
+    "house_size": {"min": 100.0, "max": 1560780.0},
+    "zip_code": {"min": 602, "max": 99901},
+}
+
+
+# ============================================================
 # Superlinked Schema Definition
 # ============================================================
 
-class Property(sl.Schema):
+@sl.schema
+class Property:
     """
     Superlinked schema for real estate properties.
     
-    Maps to realtor-data.csv columns:
-    brokered_by, status, price, bed, bath, acre_lot, street, city, state, zip_code, house_size, prev_sold_date
+    Maps directly to realtor-data.csv columns:
+    - brokered_by: float (broker ID)
+    - status: string (for_sale, sold)
+    - price: float
+    - bed: int (number of bedrooms)
+    - bath: float (number of bathrooms)
+    - acre_lot: float
+    - street: string (street identifier)
+    - city: string
+    - state: string
+    - zip_code: int
+    - house_size: float (sqft)
+    - prev_sold_date: string
     """
     id: sl.IdField
-    description: sl.String  # Combined text description for semantic search
+    description: sl.String  # Generated text for semantic search
+    
+    # Numeric fields (from CSV)
     price: sl.Float
-    bedrooms: sl.Integer
-    bathrooms: sl.Float
-    house_size: sl.Float  # sqft
+    bed: sl.Integer  # bedrooms
+    bath: sl.Float   # bathrooms
     acre_lot: sl.Float
+    house_size: sl.Float  # sqft
+    zip_code: sl.Integer
+    
+    # String/categorical fields (from CSV)
+    status: sl.String
     city: sl.String
     state: sl.String
-    status: sl.String
+    street: sl.String
+    brokered_by: sl.String
+    prev_sold_date: sl.String
+
+
+def load_dataset_stats(data_path: Optional[str] = None) -> Dict[str, Dict[str, float]]:
+    """
+    Load actual min/max statistics from the dataset.
+    
+    Args:
+        data_path: Path to the CSV file. If None, uses default from settings.
+        
+    Returns:
+        Dictionary with min/max values for each numeric column
+    """
+    settings = get_settings()
+    
+    if data_path is None:
+        data_path = Path(settings.DATA_PATH) / settings.DATASET_FILENAME
+    
+    stats = DATASET_STATS.copy()
+    
+    try:
+        # Read dataset to get actual statistics
+        df = pd.read_csv(data_path)
+        
+        numeric_cols = {
+            "price": ("price", 100000.0, 515000000.0),
+            "bed": ("bed", 1, 50),  # Cap outliers
+            "bath": ("bath", 1, 30),  # Cap outliers
+            "acre_lot": ("acre_lot", 0.0, 100000.0),
+            "house_size": ("house_size", 100.0, 1560780.0),
+            "zip_code": ("zip_code", 602, 99901),
+        }
+        
+        for key, (col, default_min, default_max) in numeric_cols.items():
+            if col in df.columns:
+                valid = df[col].dropna()
+                if len(valid) > 0:
+                    actual_min = float(valid.min())
+                    actual_max = float(valid.max())
+                    
+                    # For bed/bath, cap at reasonable values to handle outliers
+                    if key == "bed":
+                        actual_max = min(actual_max, 50)
+                    elif key == "bath":
+                        actual_max = min(actual_max, 30)
+                    
+                    stats[key] = {"min": actual_min, "max": actual_max}
+                    
+        print(f"Loaded dataset statistics from {data_path}")
+        for key, val in stats.items():
+            print(f"  {key}: min={val['min']}, max={val['max']}")
+            
+    except Exception as e:
+        print(f"Warning: Could not load dataset stats: {e}")
+        print("Using default statistics")
+    
+    return stats
 
 
 class SuperlinkedService:
@@ -49,9 +145,19 @@ class SuperlinkedService:
     - Numeric filtering on price, beds, baths, size
     - Location-based filtering
     - Persistent storage via Qdrant vector database
+    
+    Schema matches realtor-data.csv exactly:
+    brokered_by, status, price, bed, bath, acre_lot, street, city, state, zip_code, house_size, prev_sold_date
     """
     
-    def __init__(self):
+    def __init__(self, load_stats_from_data: bool = True):
+        """
+        Initialize the Superlinked service.
+        
+        Args:
+            load_stats_from_data: If True, load min/max stats from dataset file.
+                                  If False, use predefined defaults.
+        """
         self.settings = get_settings()
         self._property_schema = Property()
         self._spaces = {}
@@ -61,6 +167,12 @@ class SuperlinkedService:
         self._executor = None
         self._app = None
         self._vector_database = None
+        
+        # Load dataset statistics
+        if load_stats_from_data:
+            self._stats = load_dataset_stats()
+        else:
+            self._stats = DATASET_STATS.copy()
         
         self._initialize()
     
@@ -75,61 +187,73 @@ class SuperlinkedService:
             model="Alibaba-NLP/gte-large-en-v1.5"  # High-quality embedding model
         )
         
-        # Number spaces for filtering with different modes
+        # Number spaces using actual dataset statistics
         self._spaces['price'] = sl.NumberSpace(
             number=self._property_schema.price,
-            min_value=0,
-            max_value=100_000_000,
+            min_value=self._stats["price"]["min"],
+            max_value=self._stats["price"]["max"],
             mode=sl.Mode.SIMILAR  # Find similar prices
         )
         
-        self._spaces['bedrooms'] = sl.NumberSpace(
-            number=self._property_schema.bedrooms,
-            min_value=0,
-            max_value=20,
+        self._spaces['bed'] = sl.NumberSpace(
+            number=self._property_schema.bed,
+            min_value=self._stats["bed"]["min"],
+            max_value=self._stats["bed"]["max"],
             mode=sl.Mode.SIMILAR
         )
         
-        self._spaces['bathrooms'] = sl.NumberSpace(
-            number=self._property_schema.bathrooms,
-            min_value=0,
-            max_value=20,
+        self._spaces['bath'] = sl.NumberSpace(
+            number=self._property_schema.bath,
+            min_value=self._stats["bath"]["min"],
+            max_value=self._stats["bath"]["max"],
             mode=sl.Mode.SIMILAR
         )
         
         self._spaces['house_size'] = sl.NumberSpace(
             number=self._property_schema.house_size,
-            min_value=0,
-            max_value=100_000,
+            min_value=self._stats["house_size"]["min"],
+            max_value=self._stats["house_size"]["max"],
             mode=sl.Mode.SIMILAR
         )
         
         self._spaces['acre_lot'] = sl.NumberSpace(
             number=self._property_schema.acre_lot,
-            min_value=0,
-            max_value=1000,
+            min_value=self._stats["acre_lot"]["min"],
+            max_value=self._stats["acre_lot"]["max"],
+            mode=sl.Mode.SIMILAR
+        )
+        
+        self._spaces['zip_code'] = sl.NumberSpace(
+            number=self._property_schema.zip_code,
+            min_value=self._stats["zip_code"]["min"],
+            max_value=self._stats["zip_code"]["max"],
             mode=sl.Mode.SIMILAR
         )
         
         # Create index with all spaces
         self._index = sl.Index(
-            [
+            spaces=[
                 self._spaces['description'],
                 self._spaces['price'],
-                self._spaces['bedrooms'],
-                self._spaces['bathrooms'],
+                self._spaces['bed'],
+                self._spaces['bath'],
                 self._spaces['house_size'],
                 self._spaces['acre_lot'],
+                self._spaces['zip_code'],
             ],
             fields=[
                 self._property_schema.price,
-                self._property_schema.bedrooms,
-                self._property_schema.bathrooms,
+                self._property_schema.bed,
+                self._property_schema.bath,
                 self._property_schema.house_size,
                 self._property_schema.acre_lot,
+                self._property_schema.zip_code,
                 self._property_schema.city,
                 self._property_schema.state,
                 self._property_schema.status,
+                self._property_schema.street,
+                self._property_schema.brokered_by,
+                self._property_schema.prev_sold_date,
             ]
         )
         
@@ -140,10 +264,11 @@ class SuperlinkedService:
                 weights={
                     self._spaces['description']: sl.Param("description_weight", default=1.0),
                     self._spaces['price']: sl.Param("price_weight", default=0.3),
-                    self._spaces['bedrooms']: sl.Param("bedrooms_weight", default=0.2),
-                    self._spaces['bathrooms']: sl.Param("bathrooms_weight", default=0.1),
+                    self._spaces['bed']: sl.Param("bed_weight", default=0.2),
+                    self._spaces['bath']: sl.Param("bath_weight", default=0.1),
                     self._spaces['house_size']: sl.Param("house_size_weight", default=0.1),
                     self._spaces['acre_lot']: sl.Param("acre_lot_weight", default=0.05),
+                    self._spaces['zip_code']: sl.Param("zip_code_weight", default=0.05),
                 },
             )
             .find(self._property_schema)
@@ -159,12 +284,16 @@ class SuperlinkedService:
                 sl.Param("target_price", description="Target price for the property.", default=None),
             )
             .similar(
-                self._spaces['bedrooms'],
-                sl.Param("target_bedrooms", description="Target number of bedrooms.", default=None),
+                self._spaces['bed'],
+                sl.Param("target_bed", description="Target number of bedrooms.", default=None),
             )
             .similar(
-                self._spaces['bathrooms'],
-                sl.Param("target_bathrooms", description="Target number of bathrooms.", default=None),
+                self._spaces['bath'],
+                sl.Param("target_bath", description="Target number of bathrooms.", default=None),
+            )
+            .similar(
+                self._spaces['house_size'],
+                sl.Param("target_house_size", description="Target house size in sqft.", default=None),
             )
             .filter(
                 self._property_schema.state == sl.Param("state_filter", default=None)
@@ -173,13 +302,22 @@ class SuperlinkedService:
                 self._property_schema.city == sl.Param("city_filter", default=None)
             )
             .filter(
+                self._property_schema.status == sl.Param("status_filter", default=None)
+            )
+            .filter(
                 self._property_schema.price <= sl.Param("max_price", default=None)
             )
             .filter(
                 self._property_schema.price >= sl.Param("min_price", default=None)
             )
             .filter(
-                self._property_schema.bedrooms >= sl.Param("min_bedrooms", default=None)
+                self._property_schema.bed >= sl.Param("min_bed", default=None)
+            )
+            .filter(
+                self._property_schema.bath >= sl.Param("min_bath", default=None)
+            )
+            .filter(
+                self._property_schema.house_size >= sl.Param("min_house_size", default=None)
             )
             .select_all()
             .limit(sl.Param("limit", default=10))
@@ -269,7 +407,7 @@ class SuperlinkedService:
         Ingest properties into the Superlinked index.
         
         Args:
-            properties: List of property dictionaries
+            properties: List of property dictionaries (matching realtor-data.csv schema)
             
         Returns:
             Number of properties ingested
@@ -290,8 +428,11 @@ class SuperlinkedService:
         """
         Transform a property dict to Superlinked schema format.
         
+        Expects realtor-data.csv columns:
+        brokered_by, status, price, bed, bath, acre_lot, street, city, state, zip_code, house_size, prev_sold_date
+        
         Args:
-            prop: Raw property dictionary
+            prop: Raw property dictionary from CSV
             
         Returns:
             Transformed property for Superlinked
@@ -300,54 +441,104 @@ class SuperlinkedService:
             # Create text description for semantic search
             description = self._create_description(prop)
             
+            # Handle potential NaN/None values with defaults
+            def safe_float(val, default=0.0):
+                try:
+                    if val is None or (isinstance(val, float) and pd.isna(val)):
+                        return default
+                    return float(val)
+                except (ValueError, TypeError):
+                    return default
+            
+            def safe_int(val, default=0):
+                try:
+                    if val is None or (isinstance(val, float) and pd.isna(val)):
+                        return default
+                    return int(float(val))
+                except (ValueError, TypeError):
+                    return default
+            
+            def safe_str(val, default=""):
+                if val is None or (isinstance(val, float) and pd.isna(val)):
+                    return default
+                return str(val)
+            
             return {
-                "id": str(prop.get("id", "")),
+                "id": str(prop.get("id", prop.get("index", ""))),
                 "description": description,
-                "price": float(prop.get("price") or prop.get("Price") or 0),
-                "bedrooms": int(prop.get("bed") or prop.get("Bedrooms") or prop.get("bedrooms") or 0),
-                "bathrooms": float(prop.get("bath") or prop.get("Bathrooms") or prop.get("bathrooms") or 0),
-                "house_size": float(prop.get("house_size") or prop.get("Size") or prop.get("sqft") or 0),
-                "acre_lot": float(prop.get("acre_lot") or prop.get("AcreLot") or 0),
-                "city": str(prop.get("city") or prop.get("City") or ""),
-                "state": str(prop.get("state") or prop.get("State") or ""),
-                "status": str(prop.get("status") or prop.get("Type") or "for_sale"),
+                
+                # Numeric fields (exact CSV column names)
+                "price": safe_float(prop.get("price")),
+                "bed": safe_int(prop.get("bed")),
+                "bath": safe_float(prop.get("bath")),
+                "acre_lot": safe_float(prop.get("acre_lot")),
+                "house_size": safe_float(prop.get("house_size")),
+                "zip_code": safe_int(prop.get("zip_code")),
+                
+                # String fields (exact CSV column names)
+                "status": safe_str(prop.get("status"), "for_sale"),
+                "city": safe_str(prop.get("city")),
+                "state": safe_str(prop.get("state")),
+                "street": safe_str(prop.get("street")),
+                "brokered_by": safe_str(prop.get("brokered_by")),
+                "prev_sold_date": safe_str(prop.get("prev_sold_date")),
             }
         except Exception as e:
             print(f"Error transforming property: {e}")
             return None
     
     def _create_description(self, prop: Dict[str, Any]) -> str:
-        """Create a text description from property fields."""
+        """
+        Create a text description from property fields for semantic search.
+        
+        Uses exact column names from realtor-data.csv.
+        """
         parts = []
         
-        status = prop.get("status") or prop.get("Type") or "for sale"
-        parts.append(f"Property {status.replace('_', ' ')}")
+        # Status
+        status = prop.get("status", "for sale")
+        if status:
+            parts.append(f"Property {str(status).replace('_', ' ')}")
         
-        city = prop.get("city") or prop.get("City")
-        state = prop.get("state") or prop.get("State")
-        if city and state:
+        # Location
+        city = prop.get("city")
+        state = prop.get("state")
+        if city and state and not pd.isna(city) and not pd.isna(state):
             parts.append(f"located in {city}, {state}")
         
-        price = prop.get("price") or prop.get("Price")
-        if price:
+        zip_code = prop.get("zip_code")
+        if zip_code and not pd.isna(zip_code):
+            parts.append(f"ZIP {int(zip_code)}")
+        
+        # Price
+        price = prop.get("price")
+        if price and not pd.isna(price):
             parts.append(f"priced at ${float(price):,.0f}")
         
-        beds = prop.get("bed") or prop.get("Bedrooms") or prop.get("bedrooms")
-        baths = prop.get("bath") or prop.get("Bathrooms") or prop.get("bathrooms")
-        if beds:
+        # Beds and baths
+        beds = prop.get("bed")
+        baths = prop.get("bath")
+        if beds and not pd.isna(beds):
             parts.append(f"with {int(beds)} bedrooms")
-        if baths:
-            parts.append(f"and {float(baths)} bathrooms")
+        if baths and not pd.isna(baths):
+            parts.append(f"and {float(baths):.1f} bathrooms")
         
-        sqft = prop.get("house_size") or prop.get("Size") or prop.get("sqft")
-        if sqft:
+        # Size
+        sqft = prop.get("house_size")
+        if sqft and not pd.isna(sqft):
             parts.append(f"{float(sqft):,.0f} square feet")
         
-        acre_lot = prop.get("acre_lot") or prop.get("AcreLot")
-        if acre_lot:
+        # Lot size
+        acre_lot = prop.get("acre_lot")
+        if acre_lot and not pd.isna(acre_lot) and float(acre_lot) > 0:
             parts.append(f"on {float(acre_lot):.2f} acres")
         
-        return " ".join(parts)
+        # Previous sale
+        prev_sold = prop.get("prev_sold_date")
+        if prev_sold and not pd.isna(prev_sold):
+            parts.append(f"previously sold {prev_sold}")
+        
+        return " ".join(parts) if parts else "Real estate property"
     
     def search(
         self,
@@ -362,7 +553,12 @@ class SuperlinkedService:
         Args:
             query: Natural language search query
             top_k: Number of results to return
-            filters: Optional filters (min_price, max_price, min_bedrooms, state, city)
+            filters: Optional filters matching CSV columns:
+                - min_price, max_price
+                - min_bed, min_bath
+                - min_house_size
+                - state, city, status
+                - target_price, target_bed, target_bath, target_house_size
             use_natural_language: Whether to use LLM for query understanding
             
         Returns:
@@ -379,9 +575,12 @@ class SuperlinkedService:
                 # Pass explicit filters if provided
                 min_price=filters.get("min_price"),
                 max_price=filters.get("max_price"),
-                min_bedrooms=filters.get("min_bedrooms"),
+                min_bed=filters.get("min_bed") or filters.get("min_bedrooms"),
+                min_bath=filters.get("min_bath") or filters.get("min_bathrooms"),
+                min_house_size=filters.get("min_house_size"),
                 state_filter=filters.get("state"),
                 city_filter=filters.get("city"),
+                status_filter=filters.get("status"),
             )
         else:
             # Direct parameter query
@@ -391,11 +590,16 @@ class SuperlinkedService:
                 limit=top_k,
                 min_price=filters.get("min_price"),
                 max_price=filters.get("max_price"),
-                min_bedrooms=filters.get("min_bedrooms"),
+                min_bed=filters.get("min_bed") or filters.get("min_bedrooms"),
+                min_bath=filters.get("min_bath") or filters.get("min_bathrooms"),
+                min_house_size=filters.get("min_house_size"),
                 target_price=filters.get("target_price"),
-                target_bedrooms=filters.get("target_bedrooms"),
+                target_bed=filters.get("target_bed") or filters.get("target_bedrooms"),
+                target_bath=filters.get("target_bath") or filters.get("target_bathrooms"),
+                target_house_size=filters.get("target_house_size"),
                 state_filter=filters.get("state"),
                 city_filter=filters.get("city"),
+                status_filter=filters.get("status"),
             )
         
         # Convert results to standard format
@@ -410,17 +614,31 @@ class SuperlinkedService:
             df = sl.PandasConverter.to_pandas(result)
             
             for _, row in df.iterrows():
+                # Return data using exact CSV column names
                 properties.append({
                     "id": str(row.get("id", "")),
-                    "Type": row.get("status", "for_sale"),
+                    "status": row.get("status", "for_sale"),
+                    "price": row.get("price"),
+                    "bed": row.get("bed"),
+                    "bath": row.get("bath"),
+                    "house_size": row.get("house_size"),
+                    "acre_lot": row.get("acre_lot"),
+                    "city": row.get("city"),
+                    "state": row.get("state"),
+                    "zip_code": row.get("zip_code"),
+                    "street": row.get("street"),
+                    "brokered_by": row.get("brokered_by"),
+                    "prev_sold_date": row.get("prev_sold_date"),
+                    "score": row.get("_score", 0),
+                    # Also include aliases for backward compatibility
                     "Price": row.get("price"),
-                    "Bedrooms": row.get("bedrooms"),
-                    "Bathrooms": row.get("bathrooms"),
+                    "Bedrooms": row.get("bed"),
+                    "Bathrooms": row.get("bath"),
                     "Size": row.get("house_size"),
                     "AcreLot": row.get("acre_lot"),
                     "City": row.get("city"),
                     "State": row.get("state"),
-                    "score": row.get("_score", 0),
+                    "Type": row.get("status", "for_sale"),
                 })
         except Exception as e:
             print(f"Error converting results: {e}")
@@ -459,6 +677,7 @@ class SuperlinkedService:
             "status": "running",
             "backend": backend,
             "spaces": list(self._spaces.keys()),
+            "dataset_stats": self._stats,
         }
         
         if self._vector_database:
@@ -492,9 +711,12 @@ class SuperlinkedService:
 _superlinked_service: Optional[SuperlinkedService] = None
 
 
-def get_superlinked_service() -> SuperlinkedService:
+def get_superlinked_service(load_stats_from_data: bool = True) -> SuperlinkedService:
     """
     Get or create the Superlinked service singleton.
+    
+    Args:
+        load_stats_from_data: If True, load min/max stats from dataset file on first init.
     
     Returns:
         SuperlinkedService instance
@@ -502,7 +724,6 @@ def get_superlinked_service() -> SuperlinkedService:
     global _superlinked_service
     
     if _superlinked_service is None:
-        _superlinked_service = SuperlinkedService()
+        _superlinked_service = SuperlinkedService(load_stats_from_data=load_stats_from_data)
     
     return _superlinked_service
-
