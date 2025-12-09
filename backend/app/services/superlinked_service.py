@@ -41,8 +41,7 @@ DATASET_STATS = {
 # Superlinked Schema Definition
 # ============================================================
 
-@sl.schema
-class Property:
+class Property(sl.Schema):
     """
     Superlinked schema for real estate properties.
     
