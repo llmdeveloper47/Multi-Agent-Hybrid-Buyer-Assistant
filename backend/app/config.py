@@ -28,6 +28,10 @@ class Settings(BaseSettings):
     VECTOR_STORE_TYPE: str = "superlinked"  # Options: "superlinked", "qdrant", "pinecone"
     USE_SUPERLINKED: bool = True  # Use Superlinked for vector search (recommended)
     
+    # Superlinked REST Server Settings
+    SUPERLINKED_SERVER_URL: str = "http://localhost:8080"  # REST server URL
+    SUPERLINKED_PORT: int = 8080  # Port for the REST server
+    
     # Qdrant Settings
     QDRANT_HOST: str = "localhost"
     QDRANT_PORT: int = 6333

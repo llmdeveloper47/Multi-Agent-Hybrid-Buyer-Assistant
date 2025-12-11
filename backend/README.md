@@ -1,127 +1,51 @@
 # Hybrid Buyer Advisor - Backend
 
-A multi-agent AI assistant for real estate buyers, powered by **LangGraph**, **Superlinked**, and **OpenAI GPT** models.
+A multi-agent AI assistant for real estate property search, using **Superlinked** for semantic vector search with **Qdrant Cloud** as the persistent vector database.
 
 ## Features
 
-- **Natural Language Property Search**: Ask questions like "Find 3-bedroom houses under $500k in Seattle"
-- **Personalized Recommendations**: Get property suggestions based on your preferences
-- **Price Valuation Estimates**: Understand if a property is fairly priced
-- **Trade-off Analysis**: Compare properties and understand pros/cons
-- **Favorites Management**: Save and manage your favorite properties
+- **Multi-modal Search**: Combines semantic text search with numeric similarity (price, bedrooms, size)
+- **Natural Language Queries**: Ask questions like "3 bedroom house under $500k in Austin"
+- **Persistent Storage**: Data stored in Qdrant Cloud (survives restarts)
+- **Multi-Agent Architecture**: Specialized agents for search, valuation, comparison, and more
 
 ## Architecture
 
-### Superlinked + Qdrant Integration
-
-The system uses **[Superlinked](https://docs.superlinked.com/)** with **Qdrant** as the vector database backend:
-
 ```
-User Query → LangGraph Agents → Superlinked (Query Engine) → Qdrant (Vector DB) → Results
-```
-
-**Superlinked provides:**
-- **Multi-modal vector search** - Combines text similarity with numeric filtering (price, beds, sqft)
-- **Natural language query understanding** - LLM-powered query interpretation via OpenAI
-- **Dynamic parameter weighting** - Adjust search weights at query time
-- **Automatic embedding** - Uses state-of-the-art models (Alibaba-NLP/gte-large-en-v1.5)
-
-**Qdrant provides:**
-- **Persistent vector storage** - Data survives restarts
-- **High-performance search** - Optimized for similarity queries
-- **Metadata filtering** - Filter by price, location, bedrooms, etc.
-
-### Multi-Agent Workflow (LangGraph)
-
-```
-                         ┌──────────────┐
-                         │    Router    │
-                         │   (Intent)   │
-                         └──────┬───────┘
-                                │
-         ┌──────────┬───────────┼───────────┬──────────┐
-         ▼          ▼           ▼           ▼          ▼
-   ┌──────────┐┌──────────┐┌──────────┐┌──────────┐┌──────────┐
-   │  Filter  ││Valuation ││Comparison││  Market  ││ Favorites│
-   │  Agent   ││  Agent   ││  Agent   ││ Insights ││  Agent   │
-   └────┬─────┘└────┬─────┘└────┬─────┘└────┬─────┘└────┬─────┘
-        │           │           │           │           │
-        └───────────┴───────────┼───────────┴───────────┘
-                                │
-                                ▼
-                     ┌──────────────────┐
-                     │   Conversation   │
-                     │     Manager      │
-                     └──────────────────┘
-```
-
-### Agents
-
-| Agent | Purpose |
-|-------|---------|
-| **Router** | Classifies user intent and routes to specialist agents |
-| **Filter & Matching** | Property search using Superlinked natural language queries |
-| **Valuation** | Property value estimates and pricing analysis |
-| **Comparison** | Trade-off analysis and property comparisons |
-| **Market Insights** | Real estate market statistics and trends |
-| **Favorites** | Manages user's saved properties |
-| **Conversation Manager** | Orchestrates dialogue and composes final responses |
-
-## Project Structure
-
-```
-backend/
-├── app/
-│   ├── __init__.py
-│   ├── main.py                    # FastAPI application
-│   ├── config.py                  # Configuration settings
-│   ├── models/
-│   │   ├── schemas.py             # Pydantic API models
-│   │   └── state.py               # LangGraph state definitions
-│   ├── agents/
-│   │   ├── base_agent.py          # Base agent with Superlinked access
-│   │   ├── router_agent.py        # Intent classification
-│   │   ├── filter_agent.py        # Property search (uses Superlinked)
-│   │   ├── valuation_agent.py     # Price analysis
-│   │   ├── comparison_agent.py    # Property comparisons
-│   │   ├── market_insights_agent.py
-│   │   ├── favorites_agent.py
-│   │   └── conversation_manager.py
-│   ├── services/
-│   │   ├── superlinked_service.py # Superlinked + Qdrant integration
-│   │   ├── llm_service.py         # OpenAI GPT integration
-│   │   └── session_service.py     # User session management
-│   ├── workflow/
-│   │   └── graph.py               # LangGraph workflow definition
-│   └── utils/
-│       └── helpers.py
-├── System_Prompts/                # Editable agent prompts
-│   ├── router_agent_prompt.txt
-│   ├── filter_agent_prompt.txt
-│   ├── valuation_agent_prompt.txt
-│   ├── comparison_agent_prompt.txt
-│   ├── market_insights_agent_prompt.txt
-│   ├── favorites_agent_prompt.txt
-│   └── conversation_manager_prompt.txt
-├── scripts/
-│   ├── data_ingestion_superlinked.py  # Ingest data into Superlinked/Qdrant
-│   └── create_sample_data.py          # Generate test data
-├── data/                          # Dataset directory
-├── requirements.txt
-├── env.example
-├── run.py                         # Quick start script
-└── README.md
+┌─────────────────────────────────────────────────────────────────┐
+│                      Hybrid Buyer Advisor                        │
+├─────────────────────────────────────────────────────────────────┤
+│  FastAPI Application (main.py)                                   │
+│    ├── Query Endpoint                                            │
+│    ├── Favorites Management                                      │
+│    └── Health Check                                              │
+├─────────────────────────────────────────────────────────────────┤
+│  Multi-Agent System (LangGraph)                                  │
+│    ├── Router Agent         → Intent classification              │
+│    ├── Filter Agent         → Property search                    │
+│    ├── Valuation Agent      → Price estimation                   │
+│    ├── Comparison Agent     → Trade-off analysis                 │
+│    ├── Market Insights      → Area statistics                    │
+│    └── Favorites Agent      → Manage saved properties            │
+├─────────────────────────────────────────────────────────────────┤
+│  Infrastructure Layer                                            │
+│    └── Superlinked PropertySearchService                         │
+│          ├── Schema: Property (price, bed, bath, city, etc.)     │
+│          ├── Spaces: description, price, bed, bath, size, lot    │
+│          ├── Query: Natural language + filters                   │
+│          └── Backend: Qdrant Cloud                               │
+└─────────────────────────────────────────────────────────────────┘
 ```
 
 ## Quick Start
 
 ### 1. Prerequisites
 
-- Python 3.10+
-- Docker (for Qdrant)
+- Python 3.11 or 3.12
+- Qdrant Cloud account (free tier available at https://cloud.qdrant.io)
 - OpenAI API key
 
-### 2. Installation
+### 2. Setup Environment
 
 ```bash
 cd backend
@@ -134,184 +58,343 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 ```
 
-### 3. Configuration
+### 3. Configure Environment Variables
+
+Create a `.env` file:
 
 ```bash
-# Copy environment template
 cp env.example .env
-
-# Edit .env and add your OpenAI API key
-# OPENAI_API_KEY=your-api-key-here
 ```
 
-### 4. Start Qdrant (Vector Database)
+Edit `.env` with your credentials:
 
-**Option A: Docker (Recommended)**
-```bash
-docker run -p 6333:6333 -p 6334:6334 \
-    -v $(pwd)/qdrant_storage:/qdrant/storage:z \
-    qdrant/qdrant
+```env
+# OpenAI (required)
+OPENAI_API_KEY=sk-your-key-here
+OPENAI_MODEL=gpt-4o-mini
+
+# Qdrant Cloud (required)
+QDRANT_URL=https://your-cluster-id.cloud.qdrant.io
+QDRANT_API_KEY=your-qdrant-api-key
 ```
 
-**Option B: Qdrant Cloud**
-1. Sign up at [Qdrant Cloud](https://cloud.qdrant.io/)
-2. Create a cluster and get your API key
-3. Update `.env`:
-   ```
-   QDRANT_URL=https://your-cluster.cloud.qdrant.io
-   QDRANT_API_KEY=your-api-key
-   ```
+---
 
-**Verify Qdrant is running:**
+## Data Ingestion
+
+### Step 1: Prepare Your Dataset
+
+Place your dataset at `data/realtor-data.csv`. The CSV should have these columns:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `price` | float | Listing price in USD |
+| `bed` | int | Number of bedrooms |
+| `bath` | float | Number of bathrooms |
+| `house_size` | float | Square footage |
+| `acre_lot` | float | Lot size in acres |
+| `city` | string | City name |
+| `state` | string | State name |
+| `status` | string | "for_sale" or "sold" |
+| `zip_code` | string | ZIP code |
+| `street` | string | Street identifier |
+| `brokered_by` | string | Broker ID |
+| `prev_sold_date` | string | Previous sale date |
+
+### Step 2: Test with a Small Sample
+
+Always test with a small sample first to verify everything works:
+
 ```bash
-curl http://localhost:6333/collections
-```
-
-### 5. Prepare & Ingest Data
-
-The system uses the **realtor-data.csv** dataset:
-
-```bash
-# Ingest data into Superlinked/Qdrant (sample of 10,000 records)
-python -m scripts.data_ingestion_superlinked \
+python -m scripts.ingest_properties \
     --data-path ./data/realtor-data.csv \
-    --sample-size 10000 \
+    --sample-size 1000 \
+    --batch-size 500 \
     --verify
+```
 
-# For larger datasets
-python -m scripts.data_ingestion_superlinked \
+### Step 3: Ingest Full Dataset
+
+Once the test passes, ingest the full dataset:
+
+```bash
+python -m scripts.ingest_properties \
     --data-path ./data/realtor-data.csv \
-    --sample-size 50000 \
+    --batch-size 500 \
     --verify
 ```
 
-**Dataset Schema:**
+**Ingestion Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `--data-path` | Path to CSV file | Required |
+| `--sample-size` | Number of records to sample | All records |
+| `--batch-size` | Records per batch (reduce if hitting size limits) | 500 |
+| `--verify` | Run test queries after ingestion | False |
+
+**Expected Output:**
 ```
-brokered_by, status, price, bed, bath, acre_lot, street, city, state, zip_code, house_size, prev_sold_date
+==================================================
+PROPERTY DATA INGESTION
+==================================================
+Data path: ./data/realtor-data.csv
+Sample size: All records
+Batch size: 500
+Qdrant URL: https://your-cluster.cloud.qdrant.io
+==================================================
+
+Initializing PropertySearchService...
+PropertySearchService initialized with Qdrant RestExecutor
+Loading data from ./data/realtor-data.csv
+Loaded 1037588 records
+
+Ingesting data in batches...
+Ingesting batches: 100%|████████████████| 2076/2076 [45:32<00:00, 1.32s/it]
+
+✅ Successfully ingested 1037588 properties
+✅ Done!
 ```
 
-### 6. Run the Server
+---
+
+## Monitoring Qdrant
+
+### Check Point Count (CLI)
+
+Monitor how many records have been ingested:
 
 ```bash
-# Quick start
-python run.py
-
-# Or with uvicorn directly
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+# Replace with your Qdrant URL and API key
+curl -s "https://YOUR-CLUSTER-ID.cloud.qdrant.io:6333/collections/default" \
+  -H "api-key: YOUR_QDRANT_API_KEY" | python -c "
+import sys, json
+data = json.load(sys.stdin)
+result = data.get('result', {})
+print(f\"Points: {result.get('points_count', 0):,}\")
+print(f\"Indexed: {result.get('indexed_vectors_count', 0):,}\")
+print(f\"Status: {result.get('status', 'unknown')}\")
+"
 ```
 
-The API will be available at `http://localhost:8000`
+### Real-time Monitoring
 
-## API Usage
-
-### Query the Assistant
+Watch the point count update in real-time during ingestion:
 
 ```bash
-curl -X POST "http://localhost:8000/query" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "session_id": "user123",
-    "message": "Find 3 bedroom houses in Florida under $300k"
-  }'
+# Run in a separate terminal while ingestion is running
+while true; do
+  count=$(curl -s "https://YOUR-CLUSTER-ID.cloud.qdrant.io:6333/collections/default" \
+    -H "api-key: YOUR_QDRANT_API_KEY" | grep -o '"points_count":[0-9]*' | cut -d: -f2)
+  echo "$(date '+%H:%M:%S') - Points: $count"
+  sleep 10
+done
 ```
 
-### Example Queries
+### Qdrant Cloud Dashboard
 
-| Query Type | Example |
-|------------|---------|
-| **Search** | "Find 4 bed homes in Texas around $500k" |
-| **Valuation** | "Is $400k a good price for a 3 bed house in Miami?" |
-| **Comparison** | "Compare the first two properties" |
-| **Market** | "What's the average home price in California?" |
-| **Favorites** | "Add this to my favorites" |
+1. Go to https://cloud.qdrant.io
+2. Sign in to your account
+3. Click on your cluster
+4. Navigate to **Collections** tab
+5. View the `default` collection to see:
+   - **Points count**: Number of ingested records
+   - **Vectors count**: Number of vectors stored
+   - **Collection status**: Health status
 
-### API Endpoints
+### List All Collections
 
-| Method | Endpoint | Description |
-|--------|----------|-------------|
-| GET | `/` | API information |
-| GET | `/health` | Health check (Superlinked + Qdrant status) |
-| POST | `/query` | Send a message to the assistant |
-| GET | `/favorites/{session_id}` | Get user's favorites |
-| POST | `/favorites` | Add property to favorites |
-| DELETE | `/favorites` | Remove from favorites |
-| GET | `/stats` | System statistics |
+```bash
+curl "https://YOUR-CLUSTER-ID.cloud.qdrant.io:6333/collections" \
+  -H "api-key: YOUR_QDRANT_API_KEY"
+```
 
-### Interactive Documentation
+### Delete Collection (Reset)
 
-Visit `http://localhost:8000/docs` for Swagger UI.
+If you need to start fresh:
 
-## System Prompts
+```bash
+curl -X DELETE "https://YOUR-CLUSTER-ID.cloud.qdrant.io:6333/collections/default" \
+  -H "api-key: YOUR_QDRANT_API_KEY"
+```
 
-Agent prompts are stored in `System_Prompts/` as editable text files:
+---
 
-| File | Agent | Purpose |
-|------|-------|---------|
-| `router_agent_prompt.txt` | Router | Intent classification |
-| `filter_agent_prompt.txt` | Filter | Property search formatting |
-| `valuation_agent_prompt.txt` | Valuation | Price analysis |
-| `comparison_agent_prompt.txt` | Comparison | Property comparisons |
-| `market_insights_agent_prompt.txt` | Market | Market statistics |
-| `favorites_agent_prompt.txt` | Favorites | Favorites management |
-| `conversation_manager_prompt.txt` | Manager | Response composition |
+## Run the API Server
 
-**Changes take effect immediately** (no restart needed).
+```bash
+python -m app.main
+# Or: uvicorn app.main:app --reload --port 8000
+```
 
-## Configuration
+API available at: http://localhost:8000
 
-Key settings in `.env`:
+---
 
-| Variable | Description | Default |
-|----------|-------------|---------|
-| `OPENAI_API_KEY` | OpenAI API key | **Required** |
-| `OPENAI_MODEL` | GPT model | `gpt-4` |
-| `QDRANT_HOST` | Qdrant host | `localhost` |
-| `QDRANT_PORT` | Qdrant port | `6333` |
-| `QDRANT_URL` | Full Qdrant URL (overrides host:port) | - |
-| `QDRANT_API_KEY` | Qdrant Cloud API key | - |
-| `SEARCH_TOP_K` | Number of search results | `10` |
+## Project Structure
+
+```
+backend/
+├── app/
+│   ├── __init__.py
+│   ├── main.py                 # FastAPI application
+│   ├── config.py               # Settings & environment
+│   ├── agents/                 # Multi-agent system
+│   │   ├── base_agent.py
+│   │   ├── router_agent.py
+│   │   ├── filter_agent.py
+│   │   ├── valuation_agent.py
+│   │   ├── comparison_agent.py
+│   │   ├── market_insights_agent.py
+│   │   ├── favorites_agent.py
+│   │   └── conversation_manager.py
+│   ├── infrastructure/         # External service integrations
+│   │   └── superlinked/
+│   │       ├── __init__.py
+│   │       ├── constants.py    # Min/max values, state list
+│   │       ├── index.py        # Schema & embedding spaces
+│   │       ├── query.py        # Query definition
+│   │       └── service.py      # PropertySearchService
+│   ├── models/
+│   │   ├── schemas.py          # Pydantic models
+│   │   └── state.py            # LangGraph state
+│   ├── services/
+│   │   ├── llm_service.py      # OpenAI integration
+│   │   └── session_service.py  # User sessions
+│   └── workflow/
+│       └── graph.py            # LangGraph workflow
+├── scripts/
+│   ├── ingest_properties.py    # Data ingestion script
+│   └── create_sample_data.py   # Generate test data
+├── data/
+│   └── realtor-data.csv        # Property dataset
+├── System_Prompts/             # Agent prompt templates
+├── requirements.txt
+├── env.example
+└── README.md
+```
+
+---
+
+## Superlinked Integration
+
+### How It Works
+
+1. **Schema**: Defines property fields (price, bed, bath, etc.)
+2. **Embedding Spaces**: Creates vector spaces for semantic + numeric similarity
+3. **Index**: Combines all spaces for multi-modal search
+4. **Query**: Supports natural language with LLM-powered parameter extraction
+5. **Qdrant Backend**: Persists vectors and enables fast similarity search
+
+### Search Features
+
+**Natural Language Queries:**
+```python
+results = await service.search_properties(
+    "3 bedroom house under $400000 in California",
+    limit=10
+)
+```
+
+**With Explicit Filters:**
+```python
+results = await service.search_properties(
+    "spacious family home",
+    limit=10,
+    state="Texas",
+    min_bed=3,
+    max_price=500000
+)
+```
+
+### Embedding Spaces
+
+| Space | Field | Mode | Description |
+|-------|-------|------|-------------|
+| `description_space` | description | Text Similarity | Semantic search on property descriptions |
+| `price_space` | price | MINIMUM | Lower prices score higher |
+| `bed_space` | bed | MAXIMUM | More bedrooms score higher |
+| `bath_space` | bath | MAXIMUM | More bathrooms score higher |
+| `house_size_space` | house_size | MAXIMUM | Larger homes score higher |
+| `acre_lot_space` | acre_lot | MAXIMUM | Larger lots score higher |
+
+---
+
+## API Endpoints
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Health check |
+| `/query` | POST | Natural language property search |
+| `/favorites` | GET | Get user's saved properties |
+| `/favorites` | POST | Add property to favorites |
+| `/favorites/{id}` | DELETE | Remove from favorites |
+
+---
 
 ## Troubleshooting
 
-### "Superlinked not connected"
+### "Connection to Qdrant failed"
 
-1. Ensure Qdrant is running: `curl http://localhost:6333/collections`
-2. Check Docker: `docker ps`
-3. Verify `.env` settings
+1. Check `QDRANT_URL` includes `https://`
+2. Verify `QDRANT_API_KEY` is correct
+3. Ensure Qdrant cluster is running (check dashboard)
 
-### "OpenAI API Error"
+### "Falling back to InMemoryExecutor"
 
-1. Check `OPENAI_API_KEY` in `.env`
-2. Verify account has credits
-3. Try `gpt-3.5-turbo` for lower cost
-
-### Data Ingestion Issues
+This means Qdrant connection failed. Common causes:
+1. **Collection mismatch**: Delete the existing collection and re-run ingestion
+2. **Invalid credentials**: Check your API key
+3. **Network issues**: Verify you can reach the Qdrant URL
 
 ```bash
-# Verify data file exists
-ls -la ./data/realtor-data.csv
+# Delete existing collection
+curl -X DELETE "https://YOUR-CLUSTER.cloud.qdrant.io:6333/collections/default" \
+  -H "api-key: YOUR_API_KEY"
 
-# Run with verbose output
-python -m scripts.data_ingestion_superlinked \
-    --data-path ./data/realtor-data.csv \
-    --sample-size 1000 \
-    --verify
+# Re-run ingestion
+python -m scripts.ingest_properties --data-path ./data/realtor-data.csv --batch-size 500
 ```
+
+### "Payload too large" Error
+
+Reduce batch size:
+```bash
+python -m scripts.ingest_properties \
+    --data-path ./data/realtor-data.csv \
+    --batch-size 200
+```
+
+### "No results found"
+
+1. Verify data was ingested: check Qdrant dashboard for collection point count
+2. Try broader queries without filters
+3. Check if dataset was sampled too small
+
+### "Superlinked import error"
+
+```bash
+pip install --upgrade "superlinked>=37.5.0"
+```
+
+---
 
 ## Development
 
 ```bash
 # Run tests
-pytest tests/ -v
+pytest
 
 # Format code
-black app/
-isort app/
+black app/ scripts/
+isort app/ scripts/
 
-# Type checking
+# Type check
 mypy app/
 ```
 
+---
+
 ## License
 
-MIT License
+MIT
